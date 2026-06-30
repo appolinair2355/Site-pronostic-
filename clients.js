@@ -1,832 +1,752 @@
-// ═══════════════════════════════════════════════════════════════
-// PRONOSAI PRO — clients.js (Frontend JavaScript)
-// ═══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════
+//  PRONOSAI PRO — clients.js (CORRIGÉ)
+// ══════════════════════════════════════════════════════
+let token = localStorage.getItem('pronosai_token') || null;
+let moi = null;
+let matchsRecuperes = [];
+let matchsSelectionnes = new Set();
 
-const API_URL = window.location.origin;
-
-let currentUser = null;
-let token = localStorage.getItem('token');
-let allMatches = [];
-let selectedMatches = new Set();
-let adminMatches = [];
-let adminSelectedMatches = new Set();
-
-// ── Utilitaires ────────────────────────────────────────────────
-function $(id){ return document.getElementById(id); }
-function toast(msg, type='ok'){
-  const z = $('toast-zone');
-  const t = document.createElement('div');
-  t.className = 'toast toast-'+type;
-  t.textContent = msg;
-  z.appendChild(t);
-  setTimeout(()=>t.remove(),4000);
+// ── Utilitaires ────────────────────────────────────────
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
 }
-function fmtDate(d){ return new Date(d).toLocaleDateString('fr-FR'); }
-
-// ── Auth ───────────────────────────────────────────────────────
-async function doConnexion(){
-  const btn = $('btnConn'); btn.disabled = true;
-  const r = await fetch(`${API_URL}/auth/login`,{
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({username:$('connUser').value, password:$('connPass').value})
+function toast(msg, type = 'inf') {
+  const zone = document.getElementById('toast-zone');
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.textContent = msg;
+  zone.appendChild(el);
+  setTimeout(() => el.remove(), 3400);
+}
+function api(url, opts = {}) {
+  const h = { 'Content-Type': 'application/json' };
+  if (token) h['Authorization'] = `Bearer ${token}`;
+  return fetch(url, { headers: h, ...opts }).then(async r => {
+    const text = await r.text();
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      console.error('Réponse non-JSON:', text.substring(0, 200));
+      return { error: 'Erreur serveur — réponse invalide. Vérifiez que le serveur est en ligne.' };
+    }
   });
-  const d = await r.json();
-  btn.disabled = false;
-  if(!d.success){ $('msgConn').className='auth-msg err'; $('msgConn').textContent=d.error; return; }
-  token = d.token; localStorage.setItem('token',token); currentUser=d.user;
-  initSession();
 }
-async function doInscription(){
-  const btn = $('btnInsc'); btn.disabled = true;
-  const r = await fetch(`${API_URL}/auth/register`,{
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({username:$('inscUser').value, password:$('inscPass').value})
+function dateFr(iso) {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  } catch { return iso; }
+}
+function pillStatut(s) {
+  if (s === 'verifie' || s === 'verified')  return '<span class="pill pill-ver">✅ Vérifié — Gagné</span>';
+  if (s === 'perdu'   || s === 'failed')    return '<span class="pill pill-per">❌ Perdu</span>';
+  return '<span class="pill pill-att">⏳ En attente de vérification</span>';
+}
+function animCount(el, target, suffix = '') {
+  const dur = 1800, step = 30, inc = target / (dur / step);
+  let cur = 0;
+  const iv = setInterval(() => {
+    cur = Math.min(cur + inc, target);
+    el.textContent = Math.floor(cur).toLocaleString('fr-FR') + suffix;
+    if (cur >= target) clearInterval(iv);
+  }, step);
+}
+
+// ── Pages ──────────────────────────────────────────────
+function afficherPage(id) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('show'));
+  document.getElementById(id)?.classList.add('show');
+}
+
+// ── Onglets utilisateur ─────────────────────────────────
+function showUserTab(id) {
+  ['tCreate','tMesPronos','tParams'].forEach(t => {
+    document.getElementById(t)?.classList.remove('show');
   });
-  const d = await r.json();
-  btn.disabled = false;
-  if(!d.success){ $('msgInsc').className='auth-msg err'; $('msgInsc').textContent=d.error; return; }
-  $('msgInsc').className='auth-msg ok'; $('msgInsc').textContent='Compte créé ! En attente de confirmation admin.';
+  document.getElementById(id)?.classList.add('show');
+  document.querySelectorAll('#navUser .ntab').forEach((t, i) => {
+    t.classList.toggle('active', ['tCreate','tMesPronos','tParams'][i] === id);
+  });
+  if (id === 'tMesPronos') chargerMesPronos();
+  if (id === 'tParams') {
+    const auj = new Date().toISOString().split('T')[0];
+    document.getElementById('pmDate').value = auj;
+    showParamTab('pMatchs');
+    chargerVerifUser();
+  }
 }
-function deconnexion(){ localStorage.removeItem('token'); location.reload(); }
 
-function switchTab(t){
-  $('tabConn').className = t==='conn'?'auth-tab active':'auth-tab';
-  $('tabInsc').className = t==='insc'?'auth-tab active':'auth-tab';
-  $('formConn').style.display = t==='conn'?'block':'none';
-  $('formInsc').style.display = t==='insc'?'block':'none';
+// ── Onglets paramètres ────────────────────────────────
+function showParamTab(id) {
+  ['pMatchs','pVerif'].forEach(t => document.getElementById(t)?.classList.remove('show'));
+  document.getElementById(id)?.classList.add('show');
+  document.querySelectorAll('#tParams .nav .ntab').forEach((t, i) => {
+    t.classList.toggle('active', i === (id === 'pMatchs' ? 0 : 1));
+  });
 }
 
-// ── Session ────────────────────────────────────────────────────
-async function initSession(){
-  if(!token) return showPage('pageAuth');
-  try{
-    const r = await fetch(`${API_URL}/auth/me`,{headers:{'Authorization':'Bearer '+token}});
-    if(!r.ok) throw new Error();
-    currentUser = await r.json();
-  }catch{ localStorage.removeItem('token'); return showPage('pageAuth'); }
+// ── Onglets admin ──────────────────────────────────────
+function showAdminTab(id) {
+  ['aUsers','aPronos','aMatchs','aVerif','aConfig'].forEach(t => document.getElementById(t)?.classList.remove('show'));
+  document.getElementById(id)?.classList.add('show');
+  const ids = ['aUsers','aPronos','aMatchs','aVerif','aConfig'];
+  document.querySelectorAll('#navAdmin .ntab:not(.zip)').forEach((t, i) => {
+    t.classList.toggle('active', ids[i] === id);
+  });
+  if (id === 'aUsers')  chargerAdminUsers();
+  if (id === 'aPronos') chargerAdminPronos();
+  if (id === 'aVerif')  chargerAdminVerif();
+  if (id === 'aConfig') chargerConfig();
+}
 
-  $('userBar').style.display = 'flex';
-  const badge = currentUser.is_admin ? 'badge-admin' : 'badge-user';
-  const txt = currentUser.is_admin ? '👑 Admin' : '👤 '+currentUser.username;
-  $('userBadgeEl').innerHTML = `<span class="badge ${badge}">${txt}</span>`;
+// ── Marchés toggle ────────────────────────────────────
+function initMarches() {
+  document.querySelectorAll('.mchip').forEach(c =>
+    c.addEventListener('click', () => c.classList.toggle('on'))
+  );
+}
 
-  if(!currentUser.is_confirmed && !currentUser.is_admin){
-    showPage('pageAttente');
-  } else if(currentUser.is_admin){
-    showPage('pageAdmin');
-    loadAdminUsers(); loadAdminPronos(); loadConfig();
-    // Init dates admin
-    const today = new Date().toISOString().split('T')[0];
-    if($('aDateDebut')) $('aDateDebut').value = today;
-    if($('aDateFin')) $('aDateFin').value = today;
+// ── Stats landing ─────────────────────────────────────
+async function chargerStats() {
+  try {
+    const data = await api('/config');
+    animCount(document.getElementById('ctrUsers'),  data.displayedUsers || 1247, '+');
+    animCount(document.getElementById('ctrMatchs'), data.stats?.matchsAnalyses || 8432, '');
+    animCount(document.getElementById('ctrTaux'),   data.stats?.tauxReussite || 73, '%');
+  } catch { /* silencieux */ }
+}
+
+// ── Auth ───────────────────────────────────────────────
+function switchTab(t) {
+  document.getElementById('tabConn').classList.toggle('active', t === 'conn');
+  document.getElementById('tabInsc').classList.toggle('active', t === 'insc');
+  document.getElementById('formConn').style.display = t === 'conn' ? 'block' : 'none';
+  document.getElementById('formInsc').style.display = t === 'insc' ? 'block' : 'none';
+}
+
+async function doConnexion() {
+  const user = document.getElementById('connUser').value.trim();
+  const pass = document.getElementById('connPass').value;
+  const msg  = document.getElementById('msgConn');
+  msg.className = 'auth-msg';
+  if (!user || !pass) { msg.className = 'auth-msg err'; msg.textContent = 'Remplissez tous les champs.'; return; }
+
+  document.getElementById('btnConn').disabled = true;
+  document.getElementById('btnConn').textContent = '⏳ Connexion…';
+  const data = await api('/auth/login', { method: 'POST', body: JSON.stringify({ username: user, password: pass }) });
+  document.getElementById('btnConn').disabled = false;
+  document.getElementById('btnConn').textContent = '🔑 Se connecter';
+
+  if (data.error) { msg.className = 'auth-msg err'; msg.textContent = data.error; return; }
+  token = data.token;
+  moi   = data.user;
+  localStorage.setItem('pronosai_token', token);
+  apresConnexion();
+}
+
+async function doInscription() {
+  const user = document.getElementById('inscUser').value.trim();
+  const pass = document.getElementById('inscPass').value;
+  const msg  = document.getElementById('msgInsc');
+  msg.className = 'auth-msg';
+  if (!user || !pass) { msg.className = 'auth-msg err'; msg.textContent = 'Remplissez tous les champs.'; return; }
+
+  document.getElementById('btnInsc').disabled = true;
+  document.getElementById('btnInsc').textContent = '⏳ Création…';
+  const data = await api('/auth/register', { method: 'POST', body: JSON.stringify({ username: user, password: pass }) });
+  document.getElementById('btnInsc').disabled = false;
+  document.getElementById('btnInsc').textContent = '📝 Créer mon compte';
+
+  if (data.error) { msg.className = 'auth-msg err'; msg.textContent = data.error; return; }
+  msg.className = 'auth-msg ok';
+  msg.textContent = '✅ ' + data.message;
+  setTimeout(() => switchTab('conn'), 2200);
+}
+
+function deconnexion() {
+  token = null; moi = null;
+  localStorage.removeItem('pronosai_token');
+  document.getElementById('userBar').style.display = 'none';
+  afficherPage('pageAuth');
+  chargerStats();
+}
+
+function apresConnexion() {
+  const bar = document.getElementById('userBar');
+  bar.style.display = 'flex';
+  const badge = document.getElementById('userBadgeEl');
+  if (moi?.is_admin) {
+    badge.innerHTML = `<span class="badge badge-admin">👑 ${esc(moi.username)} — Administrateur</span>`;
+    afficherPage('pageAdmin');
+    chargerAdminUsers();
+  } else if (!moi?.is_confirmed) {
+    afficherPage('pageAttente');
   } else {
-    showPage('pageUser');
-    loadMesPronos();
-    const today = new Date().toISOString().split('T')[0];
-    if($('dateDebut')) $('dateDebut').value = today;
-    if($('dateFin')) $('dateFin').value = today;
-  }
-  loadStats();
-}
-function showPage(id){
-  document.querySelectorAll('.page').forEach(p=>p.classList.remove('show'));
-  $(id).classList.add('show');
-}
-
-// ── Stats publiques ────────────────────────────────────────────
-async function loadStats(){
-  try{
-    const r = await fetch(`${API_URL}/config`);
-    const d = await r.json();
-    $('ctrUsers').textContent = (d.displayedUsers||0).toLocaleString();
-    $('ctrMatchs').textContent = (d.stats?.matchsAnalyses||0).toLocaleString();
-    $('ctrTaux').textContent = (d.stats?.tauxReussite||0)+'%';
-  }catch{}
-}
-
-// ── Navigation utilisateur ─────────────────────────────────────
-function showUserTab(id){
-  document.querySelectorAll('#navUser .ntab').forEach((t,i)=>{
-    t.className = (i===(['tCreate','tMesPronos','tParams'].indexOf(id)))?'ntab active':'ntab';
-  });
-  document.querySelectorAll('#pageUser .inner-page').forEach(p=>p.classList.remove('show'));
-  $(id).classList.add('show');
-}
-
-// ── Navigation admin ───────────────────────────────────────────
-function showAdminTab(id){
-  const tabs = ['aCreate','aUsers','aPronos','aMatchs','aVerif','aConfig','aIA'];
-  document.querySelectorAll('#navAdmin .ntab').forEach((t,i)=>{
-    if(i < tabs.length){
-      t.className = (i===tabs.indexOf(id))?'ntab active':'ntab';
-    }
-    if(i===7) t.className='ntab zip';
-  });
-  document.querySelectorAll('#pageAdmin .inner-page').forEach(p=>p.classList.remove('show'));
-  $(id).classList.add('show');
-  if(id==='aPronos') loadAdminPronos();
-  if(id==='aVerif') loadAdminVerif();
-  if(id==='aConfig') loadConfig();
-  if(id==='aIA') adminLoadIASettings();
-}
-
-// ── Marchés utilisateur ──────────────────────────────────────
-document.querySelectorAll('#marchesRow .mchip').forEach(chip=>{
-  chip.addEventListener('click',()=>{ chip.classList.toggle('on'); });
-});
-function getMarchesActifs(){
-  return [...document.querySelectorAll('#marchesRow .mchip.on')].map(c=>c.dataset.m);
-}
-
-// ── Marchés admin ────────────────────────────────────────────
-document.querySelectorAll('#aMarchesRow .mchip').forEach(chip=>{
-  chip.addEventListener('click',()=>{ chip.classList.toggle('on'); });
-});
-function getAdminMarchesActifs(){
-  return [...document.querySelectorAll('#aMarchesRow .mchip.on')].map(c=>c.dataset.m);
-}
-
-// ═══════════════════════════════════════════════════════════════
-// UTILISATEUR : Génération de pronostic
-// ═══════════════════════════════════════════════════════════════
-
-async function genererTout(){
-  const debut = $('dateDebut').value;
-  const fin = $('dateFin').value || debut;
-  const cote = parseFloat($('coteCible').value)||3.0;
-  const marches = getMarchesActifs();
-  if(!debut){ toast('Veuillez choisir une date','err'); return; }
-  if(marches.length===0){ toast('Sélectionnez au moins un marché','err'); return; }
-
-  $('secFormulaire').style.display='none';
-  $('secProg').style.display='block';
-  $('progLabel').textContent='Récupération des matchs en cours…';
-  $('progFill').style.width='30%';
-
-  try{
-    const r = await fetch(`${API_URL}/matches?startDate=${debut}&endDate=${fin}`,{
-      headers:{'Authorization':'Bearer '+token}
-    });
-    if(!r.ok){ const e=await r.json(); throw new Error(e.error||'Erreur'); }
-    const d = await r.json();
-    allMatches = d.matches||[];
-    $('progFill').style.width='60%';
-    $('progLabel').textContent=`${allMatches.length} matchs trouvés — Génération du combiné…`;
-
-    if(allMatches.length===0){
-      $('secProg').style.display='none';
-      $('secFormulaire').style.display='block';
-      toast('Aucun match trouvé pour cette période','err');
-      return;
-    }
-    await creerPronostic(allMatches, debut, fin, cote, marches);
-  }catch(e){
-    $('secProg').style.display='none';
-    $('secFormulaire').style.display='block';
-    toast(e.message||'Erreur réseau','err');
+    badge.innerHTML = `<span class="badge badge-user">👤 ${esc(moi.username)}</span>`;
+    afficherPage('pageUser');
+    showUserTab('tCreate');
+    resetCreation();
+    const auj = new Date().toISOString().split('T')[0];
+    document.getElementById('dateDebut').value = auj;
+    document.getElementById('dateFin').value   = auj;
   }
 }
 
-async function creerPronostic(matchs, debut, fin, cote, marches){
-  $('progLabel').textContent='Analyse IA en cours…';
-  $('progFill').style.width='85%';
-
-  const cleIA = localStorage.getItem('cleIA')||'';
-  const fournisseur = localStorage.getItem('fournisseurIA')||'groq';
-
-  try{
-    const r = await fetch(`${API_URL}/pronostics`,{
-      method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
-      body:JSON.stringify({
-        matchsSelectionnes: matchs,
-        startDate: debut, endDate: fin,
-        coteCible: cote,
-        marchesSelectionnes: marches,
-        cleIA: cleIA,
-        fournisseurIA: fournisseur
-      })
-    });
-    const d = await r.json();
-    $('secProg').style.display='none';
-    if(!d.success){
-      $('secFormulaire').style.display='block';
-      toast(d.message||'Erreur','err');
-      return;
-    }
-    afficherResultat(d.data);
-  }catch(e){
-    $('secProg').style.display='none';
-    $('secFormulaire').style.display='block';
-    toast('Erreur lors de la création','err');
-  }
+async function restaurerSession() {
+  if (!token) return;
+  const data = await api('/auth/me');
+  if (data.error) { localStorage.removeItem('pronosai_token'); token = null; return; }
+  moi = data;
+  apresConnexion();
 }
 
-function afficherResultat(data){
-  $('secResult').style.display='block';
-  $('resCote').textContent = data.coteTotal+'x';
-  $('resConf').textContent = data.confiance+'%';
-  $('confFill').style.width = data.confiance+'%';
-  $('resIA').textContent = data.analyseIA||'Aucune analyse disponible';
-
-  const container = $('resSels');
-  container.innerHTML = '';
-  data.selections.forEach(s=>{
-    container.innerHTML += `
-      <div class="sel-item">
-        <div class="sel-match">${s.match}</div>
-        <div class="sel-comp">${s.competition||''} · ${fmtDate(s.date)}</div>
-        <div class="sel-choix">${s.marche} → ${s.selection} <span class="cote-pill">${s.cote}x</span></div>
-      </div>`;
-  });
-
-  loadMesPronos();
-}
-
-function resetCreation(){
-  $('secResult').style.display='none';
-  $('secMatchs').style.display='none';
-  $('secFormulaire').style.display='block';
-  $('progFill').style.width='0%';
-}
-
-// ── Sélection manuelle utilisateur ────────────────────────────
-async function chargerMatchsSeulement(){
-  const debut = $('dateDebut').value;
-  const fin = $('dateFin').value || debut;
-  if(!debut){ toast('Choisissez une date','err'); return; }
-
-  $('secFormulaire').style.display='none';
-  $('secProg').style.display='block';
-  $('progLabel').textContent='Chargement des matchs…';
-  $('progFill').style.width='40%';
-
-  try{
-    const r = await fetch(`${API_URL}/matches?startDate=${debut}&endDate=${fin}`,{
-      headers:{'Authorization':'Bearer '+token}
-    });
-    const d = await r.json();
-    allMatches = d.matches||[];
-    $('secProg').style.display='none';
-    $('secMatchs').style.display='block';
-    renderMatchsGrid();
-  }catch(e){
-    $('secProg').style.display='none';
-    $('secFormulaire').style.display='block';
-    toast('Erreur de chargement','err');
-  }
-}
-
-function renderMatchsGrid(){
-  const grid = $('matchsGrid');
-  grid.innerHTML = '';
-  selectedMatches = new Set(allMatches.map((_,i)=>i));
-  updateSelCount();
-
-  allMatches.forEach((m,i)=>{
-    const card = document.createElement('div');
-    card.className = 'mcard on';
-    card.innerHTML = `
-      <div class="mcard-check">✓</div>
-      <div class="mcard-comp">${m.competition||''}</div>
-      <div class="mcard-teams">${m.equipe_domicile} — ${m.equipe_exterieur}</div>
-      <div class="mcard-date">${fmtDate(m.date)} ${m.heure?new Date(m.heure).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}):''}</div>
-    `;
-    card.onclick = ()=>{
-      if(selectedMatches.has(i)){
-        selectedMatches.delete(i);
-        card.className = 'mcard off';
-        card.querySelector('.mcard-check').textContent = '';
-      } else {
-        selectedMatches.add(i);
-        card.className = 'mcard on';
-        card.querySelector('.mcard-check').textContent = '✓';
-      }
-      updateSelCount();
-    };
-    grid.appendChild(card);
-  });
-}
-
-function updateSelCount(){
-  $('selCount').textContent = selectedMatches.size+' sélectionné'+(selectedMatches.size>1?'s':'');
-}
-
-async function genererDepuisSelection(){
-  if(selectedMatches.size < 2){ toast('Sélectionnez au moins 2 matchs','err'); return; }
-  const matchs = allMatches.filter((_,i)=>selectedMatches.has(i));
-  const debut = $('dateDebut').value;
-  const fin = $('dateFin').value || debut;
-  const cote = parseFloat($('coteCible').value)||3.0;
-  const marches = getMarchesActifs();
-
-  $('secMatchs').style.display='none';
-  $('secProg').style.display='block';
-  await creerPronostic(matchs, debut, fin, cote, marches);
-}
-
-// ═══════════════════════════════════════════════════════════════
-// ADMIN : Génération de pronostic
-// ═══════════════════════════════════════════════════════════════
-
-async function adminGenererTout(){
-  const debut = $('aDateDebut').value;
-  const fin = $('aDateFin').value || debut;
-  const cote = parseFloat($('aCoteCible').value)||3.0;
-  const marches = getAdminMarchesActifs();
-  if(!debut){ toast('Veuillez choisir une date','err'); return; }
-  if(marches.length===0){ toast('Sélectionnez au moins un marché','err'); return; }
-
-  $('aSecFormulaire').style.display='none';
-  $('aSecProg').style.display='block';
-  $('aProgLabel').textContent='Récupération des matchs en cours…';
-  $('aProgFill').style.width='30%';
-
-  try{
-    const r = await fetch(`${API_URL}/matches?startDate=${debut}&endDate=${fin}`,{
-      headers:{'Authorization':'Bearer '+token}
-    });
-    if(!r.ok){ const e=await r.json(); throw new Error(e.error||'Erreur'); }
-    const d = await r.json();
-    adminMatches = d.matches||[];
-    $('aProgFill').style.width='60%';
-    $('aProgLabel').textContent=`${adminMatches.length} matchs trouvés — Génération du combiné…`;
-
-    if(adminMatches.length===0){
-      $('aSecProg').style.display='none';
-      $('aSecFormulaire').style.display='block';
-      toast('Aucun match trouvé pour cette période','err');
-      return;
-    }
-    await adminCreerPronostic(adminMatches, debut, fin, cote, marches);
-  }catch(e){
-    $('aSecProg').style.display='none';
-    $('aSecFormulaire').style.display='block';
-    toast(e.message||'Erreur réseau','err');
-  }
-}
-
-async function adminCreerPronostic(matchs, debut, fin, cote, marches){
-  $('aProgLabel').textContent='Analyse IA en cours…';
-  $('aProgFill').style.width='85%';
-
-  const cleIA = localStorage.getItem('cleIA')||'';
-  const fournisseur = localStorage.getItem('fournisseurIA')||'groq';
-
-  try{
-    const r = await fetch(`${API_URL}/pronostics`,{
-      method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
-      body:JSON.stringify({
-        matchsSelectionnes: matchs,
-        startDate: debut, endDate: fin,
-        coteCible: cote,
-        marchesSelectionnes: marches,
-        cleIA: cleIA,
-        fournisseurIA: fournisseur
-      })
-    });
-    const d = await r.json();
-    $('aSecProg').style.display='none';
-    if(!d.success){
-      $('aSecFormulaire').style.display='block';
-      toast(d.message||'Erreur','err');
-      return;
-    }
-    adminAfficherResultat(d.data);
-  }catch(e){
-    $('aSecProg').style.display='none';
-    $('aSecFormulaire').style.display='block';
-    toast('Erreur lors de la création','err');
-  }
-}
-
-function adminAfficherResultat(data){
-  $('aSecResult').style.display='block';
-  $('aResCote').textContent = data.coteTotal+'x';
-  $('aResConf').textContent = data.confiance+'%';
-  $('aConfFill').style.width = data.confiance+'%';
-  $('aResIA').textContent = data.analyseIA||'Aucune analyse disponible';
-
-  const container = $('aResSels');
-  container.innerHTML = '';
-  data.selections.forEach(s=>{
-    container.innerHTML += `
-      <div class="sel-item">
-        <div class="sel-match">${s.match}</div>
-        <div class="sel-comp">${s.competition||''} · ${fmtDate(s.date)}</div>
-        <div class="sel-choix">${s.marche} → ${s.selection} <span class="cote-pill">${s.cote}x</span></div>
-      </div>`;
-  });
-
-  loadAdminPronos();
-}
-
-function adminResetCreation(){
-  $('aSecResult').style.display='none';
-  $('aSecMatchs').style.display='none';
-  $('aSecFormulaire').style.display='block';
-  $('aProgFill').style.width='0%';
-}
-
-// ── Sélection manuelle admin ───────────────────────────────────
-async function adminChargerMatchsSeulement(){
-  const debut = $('aDateDebut').value;
-  const fin = $('aDateFin').value || debut;
-  if(!debut){ toast('Choisissez une date','err'); return; }
-
-  $('aSecFormulaire').style.display='none';
-  $('aSecProg').style.display='block';
-  $('aProgLabel').textContent='Chargement des matchs…';
-  $('aProgFill').style.width='40%';
-
-  try{
-    const r = await fetch(`${API_URL}/matches?startDate=${debut}&endDate=${fin}`,{
-      headers:{'Authorization':'Bearer '+token}
-    });
-    const d = await r.json();
-    adminMatches = d.matches||[];
-    $('aSecProg').style.display='none';
-    $('aSecMatchs').style.display='block';
-    adminRenderMatchsGrid();
-  }catch(e){
-    $('aSecProg').style.display='none';
-    $('aSecFormulaire').style.display='block';
-    toast('Erreur de chargement','err');
-  }
-}
-
-function adminRenderMatchsGrid(){
-  const grid = $('aMatchsGrid');
-  grid.innerHTML = '';
-  adminSelectedMatches = new Set(adminMatches.map((_,i)=>i));
-  adminUpdateSelCount();
-
-  adminMatches.forEach((m,i)=>{
-    const card = document.createElement('div');
-    card.className = 'mcard on';
-    card.innerHTML = `
-      <div class="mcard-check">✓</div>
-      <div class="mcard-comp">${m.competition||''}</div>
-      <div class="mcard-teams">${m.equipe_domicile} — ${m.equipe_exterieur}</div>
-      <div class="mcard-date">${fmtDate(m.date)} ${m.heure?new Date(m.heure).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}):''}</div>
-    `;
-    card.onclick = ()=>{
-      if(adminSelectedMatches.has(i)){
-        adminSelectedMatches.delete(i);
-        card.className = 'mcard off';
-        card.querySelector('.mcard-check').textContent = '';
-      } else {
-        adminSelectedMatches.add(i);
-        card.className = 'mcard on';
-        card.querySelector('.mcard-check').textContent = '✓';
-      }
-      adminUpdateSelCount();
-    };
-    grid.appendChild(card);
-  });
-}
-
-function adminUpdateSelCount(){
-  $('aSelCount').textContent = adminSelectedMatches.size+' sélectionné'+(adminSelectedMatches.size>1?'s':'');
-}
-
-async function adminGenererDepuisSelection(){
-  if(adminSelectedMatches.size < 2){ toast('Sélectionnez au moins 2 matchs','err'); return; }
-  const matchs = adminMatches.filter((_,i)=>adminSelectedMatches.has(i));
-  const debut = $('aDateDebut').value;
-  const fin = $('aDateFin').value || debut;
-  const cote = parseFloat($('aCoteCible').value)||3.0;
-  const marches = getAdminMarchesActifs();
-
-  $('aSecMatchs').style.display='none';
-  $('aSecProg').style.display='block';
-  await adminCreerPronostic(matchs, debut, fin, cote, marches);
-}
-
-// ═══════════════════════════════════════════════════════════════
-// MES PRONOSTICS
-// ═══════════════════════════════════════════════════════════════
-
-async function loadMesPronos(){
-  try{
-    const r = await fetch(`${API_URL}/pronostics`,{headers:{'Authorization':'Bearer '+token}});
-    const d = await r.json();
-    const container = $('mesPronos');
-    const list = d.pronostics||[];
-    if(list.length===0){ container.innerHTML='<div class="empty">Aucun pronostic généré</div>'; return; }
-    container.innerHTML = list.map(p=>`
-      <div class="pcard">
-        <div class="pcard-head">
-          <div>
-            <div style="font-weight:700;">Combiné · ${p.coteTotal}x</div>
-            <div class="pcard-meta">${fmtDate(p.startDate)} → ${fmtDate(p.endDate)} · ${p.selections.length} sélections</div>
-          </div>
-          <div class="pcard-cote">${p.coteTotal}x</div>
-        </div>
-        <div style="font-size:.8rem;opacity:.6;margin-bottom:8px;">
-          ${p.selections.map(s=>`• ${s.match}: ${s.selection}`).join('<br>')}
-        </div>
-        <span class="pill ${p.statut_verification==='verifie'?'pill-ver':p.statut_verification==='perdu'?'pill-per':'pill-att'}">
-          ${p.statut_verification==='verifie'?'✅ Vérifié':p.statut_verification==='perdu'?'❌ Perdu':'⏳ En attente'}
-        </span>
-      </div>
-    `).join('');
-  }catch{}
-}
-
-// ═══════════════════════════════════════════════════════════════
-// PARAMÈTRES UTILISATEUR
-// ═══════════════════════════════════════════════════════════════
-
-function showParamTab(id){
-  const tabs = ['pMatchs','pVerif','pIA'];
-  document.querySelectorAll('#tParams .ntab').forEach((t,i)=>{
-    t.className = (i===tabs.indexOf(id))?'ntab active':'ntab';
-  });
-  document.querySelectorAll('#tParams .inner-page').forEach(p=>p.classList.remove('show'));
-  $(id).classList.add('show');
-
-  if(id==='pIA'){
-    $('iaFournisseur').value = getFournisseurIA();
-    $('iaCle').value = getCleIA();
-  }
-}
-
-async function chargerParamMatchs(){
-  const d=$('pmDate').value;
-  if(!d){toast('Date requise','err');return;}
-  try{
-    const r=await fetch(`${API_URL}/matches?startDate=${d}&endDate=${d}`,{headers:{'Authorization':'Bearer '+token}});
-    const data=await r.json();
-    const container=$('pmList');
-    if((data.matches||[]).length===0){container.innerHTML='<div class="empty">Aucun match</div>';return;}
-    container.innerHTML=data.matches.map(m=>`
-      <div style="padding:10px 0;border-bottom:1px solid var(--border);">
-        <strong>${m.equipe_domicile} — ${m.equipe_exterieur}</strong>
-        <div style="font-size:.78rem;opacity:.5;">${m.competition||''} · ${fmtDate(m.date)}</div>
-      </div>
-    `).join('');
-  }catch{toast('Erreur','err');}
-}
-
-// ── Gestion Clé IA Utilisateur ─────────────────────────────────
-function getCleIA(){ return localStorage.getItem('cleIA')||''; }
-function setCleIA(cle){ localStorage.setItem('cleIA',cle); }
-function getFournisseurIA(){ return localStorage.getItem('fournisseurIA')||'groq'; }
-function setFournisseurIA(f){ localStorage.setItem('fournisseurIA',f); }
-
-function sauverCleIA(){
-  setFournisseurIA($('iaFournisseur').value);
-  setCleIA($('iaCle').value);
-  $('iaMsg').className='auth-msg ok'; $('iaMsg').textContent='Clé IA sauvegardée localement !';
-  toast('Clé IA sauvegardée');
-}
-
-async function testerCleIA(){
-  const cle = $('iaCle').value;
-  const fournisseur = $('iaFournisseur').value;
-  if(!cle){ $('iaMsg').className='auth-msg err'; $('iaMsg').textContent='Entrez une clé d'abord'; return; }
-
-  $('iaMsg').className='auth-msg'; $('iaMsg').textContent='Test en cours…';
-  try{
-    const url = fournisseur==='groq'?'https://api.groq.com/openai/v1/models':'https://api.openai.com/v1/models';
-    const r = await fetch(url,{headers:{'Authorization':'Bearer '+cle}});
-    if(r.ok){
-      $('iaMsg').className='auth-msg ok'; $('iaMsg').textContent='✅ Clé valide ! Connexion réussie.';
-      sauverCleIA();
-    } else {
-      const e = await r.json();
-      $('iaMsg').className='auth-msg err'; $('iaMsg').textContent='❌ Clé invalide : '+(e.error?.message||'Erreur inconnue');
-    }
-  }catch(e){
-    $('iaMsg').className='auth-msg err'; $('iaMsg').textContent='❌ Erreur réseau : '+e.message;
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// ADMIN : Utilisateurs
-// ═══════════════════════════════════════════════════════════════
-
-async function loadAdminUsers(){
-  try{
-    const r = await fetch(`${API_URL}/admin/users`,{headers:{'Authorization':'Bearer '+token}});
-    const d = await r.json();
-    const container = $('adminUsers');
-    const users = d.users||[];
-    if(users.length===0){ container.innerHTML='<div class="empty">Aucun utilisateur</div>'; return; }
-    container.innerHTML = `
-      <table class="dtable">
-        <tr><th>ID</th><th>Identifiant</th><th>Admin</th><th>Confirmé</th><th>Actions</th></tr>
-        ${users.map(u=>`
-          <tr>
-            <td>${u.id.slice(0,12)}…</td>
-            <td><strong>${u.username}</strong></td>
-            <td>${u.is_admin?'👑 Oui':'Non'}</td>
-            <td>${u.is_confirmed?'✅':'⏳'}</td>
-            <td>
-              ${!u.is_confirmed&&!u.is_admin?`<button class="bsm b-conf" onclick="confirmerUser('${u.id}')">✓ Confirmer</button>`:''}
-              ${!u.is_admin?`<button class="bsm b-del" onclick="supprimerUser('${u.id}')">🗑 Supprimer</button>`:''}
-            </td>
-          </tr>
-        `).join('')}
-      </table>`;
-  }catch(e){ toast('Erreur chargement users','err'); }
-}
-async function confirmerUser(id){
-  await fetch(`${API_URL}/admin/users/${id}/confirm`,{method:'POST',headers:{'Authorization':'Bearer '+token}});
-  loadAdminUsers(); toast('Utilisateur confirmé');
-}
-async function supprimerUser(id){
-  if(!confirm('Supprimer cet utilisateur ?')) return;
-  await fetch(`${API_URL}/admin/users/${id}`,{method:'DELETE',headers:{'Authorization':'Bearer '+token}});
-  loadAdminUsers(); toast('Utilisateur supprimé');
-}
-
-// ═══════════════════════════════════════════════════════════════
-// ADMIN : Pronostics
-// ═══════════════════════════════════════════════════════════════
-
-async function loadAdminPronos(){
-  try{
-    const r = await fetch(`${API_URL}/admin/pronostics`,{headers:{'Authorization':'Bearer '+token}});
-    const d = await r.json();
-    const list = d.pronostics||[];
-    $('pronoBadge').textContent = list.length;
-    const container = $('adminPronos');
-    if(list.length===0){ container.innerHTML='<div class="empty">Aucun pronostic</div>'; return; }
-    container.innerHTML = list.map(p=>`
-      <div class="pcard">
-        <div class="pcard-head">
-          <div>
-            <div style="font-weight:700;">${p.username} · ${p.coteTotal}x</div>
-            <div class="pcard-meta">${fmtDate(p.startDate)} · ${p.selections.length} sélections</div>
-          </div>
-          <div style="display:flex;gap:6px;">
-            <button class="bsm b-ver" onclick="verifierProno('${p.id}','verifie')">✓ Gagné</button>
-            <button class="bsm b-del" onclick="verifierProno('${p.id}','perdu')">✗ Perdu</button>
-            <button class="bsm b-del" onclick="supprimerProno('${p.id}')">🗑</button>
-          </div>
-        </div>
-        <div style="font-size:.8rem;opacity:.6;">
-          ${p.selections.map(s=>`• ${s.match}: ${s.selection} (${s.cote}x)`).join('<br>')}
-        </div>
-        <span class="pill ${p.verified_status==='verifie'?'pill-ver':p.verified_status==='perdu'?'pill-per':'pill-att'}">
-          ${p.verified_status==='verifie'?'✅ Vérifié':p.verified_status==='perdu'?'❌ Perdu':'⏳ En attente'}
-        </span>
-      </div>
-    `).join('');
-  }catch{}
-}
-async function verifierProno(id,status){
-  await fetch(`${API_URL}/admin/pronostics/${id}/verify`,{
-    method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
-    body:JSON.stringify({status})
-  });
-  loadAdminPronos(); toast('Statut mis à jour');
-}
-async function supprimerProno(id){
-  if(!confirm('Supprimer ce pronostic ?')) return;
-  await fetch(`${API_URL}/admin/pronostics/${id}`,{method:'DELETE',headers:{'Authorization':'Bearer '+token}});
-  loadAdminPronos(); toast('Pronostic supprimé');
-}
-
-// ═══════════════════════════════════════════════════════════════
-// ADMIN : Matchs
-// ═══════════════════════════════════════════════════════════════
-
-async function chargerAdminMatchs(){
-  const s=$('amStart').value, e=$('amEnd').value;
-  if(!s){toast('Date requise','err');return;}
-  $('amStats').textContent='Chargement…';
-  try{
-    const r=await fetch(`${API_URL}/matches?startDate=${s}&endDate=${e||s}`,{headers:{'Authorization':'Bearer '+token}});
-    const d=await r.json();
-    $('amStats').textContent=`${d.total||0} matchs · ${(d.dates||[]).join(', ')}`;
-    const container=$('amTable');
-    if((d.matches||[]).length===0){container.innerHTML='<div class="empty">Aucun match</div>';return;}
-    container.innerHTML=`<table class="dtable">
-      <tr><th>Compétition</th><th>Match</th><th>Date</th><th>Statut</th></tr>
-      ${d.matches.map(m=>`<tr><td>${m.competition||''}</td><td><strong>${m.equipe_domicile} — ${m.equipe_exterieur}</strong></td><td>${fmtDate(m.date)}</td><td>${m.statut||''}</td></tr>`).join('')}
-    </table>`;
-  }catch{toast('Erreur','err');}
-}
-
-// ═══════════════════════════════════════════════════════════════
-// ADMIN : Vérification
-// ═══════════════════════════════════════════════════════════════
-
-async function loadAdminVerif(){
-  try{
-    const r=await fetch(`${API_URL}/admin/pronostics`,{headers:{'Authorization':'Bearer '+token}});
-    const d=await r.json();
-    const list=d.pronostics||[];
-    const container=$('avList');
-    if(list.length===0){container.innerHTML='<div class="empty">Aucun pronostic à vérifier</div>';return;}
-    container.innerHTML=list.map(p=>`
-      <div class="pcard">
-        <div style="font-weight:700;">${p.username} · ${p.coteTotal}x · ${fmtDate(p.startDate)}</div>
-        <div style="font-size:.8rem;opacity:.6;margin:6px 0;">
-          ${p.selections.map(s=>`• ${s.match}: ${s.selection}`).join('<br>')}
-        </div>
-        <div style="display:flex;gap:8px;">
-          <button class="bsm b-ver" onclick="verifierProno('${p.id}','verifie')">✓ Gagné</button>
-          <button class="bsm b-del" onclick="verifierProno('${p.id}','perdu')">✗ Perdu</button>
-        </div>
-      </div>
-    `).join('');
-  }catch{}
-}
-
-// ═══════════════════════════════════════════════════════════════
-// ADMIN : Configuration
-// ═══════════════════════════════════════════════════════════════
-
-async function loadConfig(){
-  try{
-    const r=await fetch(`${API_URL}/config`);
-    const d=await r.json();
-    $('cfgGrid').innerHTML=`
-      <div class="cfg-item"><div class="cfg-label">👤 Membres affichés</div><input class="cfg-input" id="cfgUsers" value="${d.displayedUsers||0}"></div>
-      <div class="cfg-item"><div class="cfg-label">⚽ Matchs analysés</div><input class="cfg-input" id="cfgMatchs" value="${d.stats?.matchsAnalyses||0}"></div>
-      <div class="cfg-item"><div class="cfg-label">🎯 Pronostics générés</div><input class="cfg-input" id="cfgPronos" value="${d.stats?.pronosticsGeneres||0}"></div>
-      <div class="cfg-item"><div class="cfg-label">📊 Taux de réussite (%)</div><input class="cfg-input" id="cfgTaux" value="${d.stats?.tauxReussite||0}"></div>
-    `;
-    const real=d.realUsers||0;
-    $('statsReelles').innerHTML=`<div class="infobox">👤 Utilisateurs réels inscrits : <strong>${real}</strong></div>`;
-  }catch{}
-}
-async function sauvegarderConfig(){
-  const body={
-    displayedUsers:parseInt($('cfgUsers').value)||0,
-    matchsAnalyses:parseInt($('cfgMatchs').value)||0,
-    pronosticsGeneres:parseInt($('cfgPronos').value)||0,
-    tauxReussite:parseInt($('cfgTaux').value)||0
+// ── Helpers communs ────────────────────────────────────
+function getParams() {
+  return {
+    deb:        document.getElementById('dateDebut').value,
+    fin:        document.getElementById('dateFin').value,
+    coteCible:  parseFloat(document.getElementById('coteCible').value) || 3.0,
+    marches:    [...document.querySelectorAll('.mchip.on')].map(c => c.dataset.m),
+    cleIA:      document.getElementById('cleIA')?.value?.trim() || '',
+    fourn:      document.getElementById('fourn')?.value || 'groq'
   };
-  try{
-    await fetch(`${API_URL}/admin/config`,{
-      method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+token},
-      body:JSON.stringify(body)
-    });
-    $('cfgMsg').className='auth-msg ok'; $('cfgMsg').textContent='Configuration sauvegardée !';
-    loadStats();
-  }catch{
-    $('cfgMsg').className='auth-msg err'; $('cfgMsg').textContent='Erreur de sauvegarde';
-  }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// ADMIN : Clé IA
-// ═══════════════════════════════════════════════════════════════
-
-function adminLoadIASettings(){
-  $('aIaFournisseur').value = getFournisseurIA();
-  $('aIaCle').value = getCleIA();
+async function fetchMatchs(deb, fin) {
+  const url = `/matches?startDate=${deb}&endDate=${fin || deb}`;
+  return api(url);
 }
 
-function adminSauverCleIA(){
-  setFournisseurIA($('aIaFournisseur').value);
-  setCleIA($('aIaCle').value);
-  $('aIaMsg').className='auth-msg ok'; $('aIaMsg').textContent='Clé IA sauvegardée localement !';
-  toast('Clé IA sauvegardée');
-}
+// ── Mode 1 : UN SEUL CLIC → charger + générer automatiquement ─────────────
+async function genererTout() {
+  const { deb, fin, coteCible, marches, cleIA, fourn } = getParams();
+  if (!deb) { toast('Choisissez une date de début', 'err'); return; }
+  if (!marches.length) { toast('Sélectionnez au moins un type de pari', 'err'); return; }
+  if (coteCible < 1.5) { toast('La cote cible minimum est 1.5', 'err'); return; }
 
-async function adminTesterCleIA(){
-  const cle = $('aIaCle').value;
-  const fournisseur = $('aIaFournisseur').value;
-  if(!cle){ $('aIaMsg').className='auth-msg err'; $('aIaMsg').textContent='Entrez une clé d'abord'; return; }
+  document.getElementById('secFormulaire').style.display = 'none';
+  document.getElementById('secMatchs').style.display    = 'none';
+  document.getElementById('secResult').style.display    = 'none';
+  document.getElementById('btnGenerer').disabled = true;
 
-  $('aIaMsg').className='auth-msg'; $('aIaMsg').textContent='Test en cours…';
-  try{
-    const url = fournisseur==='groq'?'https://api.groq.com/openai/v1/models':'https://api.openai.com/v1/models';
-    const r = await fetch(url,{headers:{'Authorization':'Bearer '+cle}});
-    if(r.ok){
-      $('aIaMsg').className='auth-msg ok'; $('aIaMsg').textContent='✅ Clé valide ! Connexion réussie.';
-      adminSauverCleIA();
-    } else {
-      const e = await r.json();
-      $('aIaMsg').className='auth-msg err'; $('aIaMsg').textContent='❌ Clé invalide : '+(e.error?.message||'Erreur inconnue');
+  // Étape 1 : Récupération des matchs
+  afficherProg('📡 Étape 1/2 — Récupération des matchs…');
+  let pct = 0;
+  const iv = setInterval(() => { pct = Math.min(pct + 6, 45); majProg(pct); }, 300);
+
+  let matchsData;
+  try {
+    matchsData = await fetchMatchs(deb, fin);
+    clearInterval(iv);
+    if (matchsData.error) {
+      toast(matchsData.error, 'err');
+      cacherProg();
+      document.getElementById('secFormulaire').style.display = 'block';
+      document.getElementById('btnGenerer').disabled = false;
+      return;
     }
-  }catch(e){
-    $('aIaMsg').className='auth-msg err'; $('aIaMsg').textContent='❌ Erreur réseau : '+e.message;
+    matchsRecuperes = matchsData.matches || [];
+    if (!matchsRecuperes.length) {
+      toast('Aucun match trouvé pour cette période. Essayez une autre date.', 'err');
+      cacherProg();
+      document.getElementById('secFormulaire').style.display = 'block';
+      document.getElementById('btnGenerer').disabled = false;
+      return;
+    }
+    matchsSelectionnes = new Set(matchsRecuperes.map(m => m.id));
+    majProg(50);
+  } catch (e) {
+    clearInterval(iv); cacherProg();
+    toast('Erreur réseau : ' + e.message, 'err');
+    document.getElementById('secFormulaire').style.display = 'block';
+    document.getElementById('btnGenerer').disabled = false;
+    return;
+  }
+
+  // Étape 2 : Génération du pronostic IA
+  document.getElementById('progLabel').textContent = '🤖 Étape 2/2 — Génération du pronostic IA…';
+  const iv2 = setInterval(() => { pct = Math.min(pct + 4, 95); majProg(pct); }, 400);
+
+  try {
+    const data = await api('/pronostics', {
+      method: 'POST',
+      body: JSON.stringify({
+        matchsSelectionnes: matchsRecuperes,
+        startDate: deb, endDate: fin || deb,
+        coteCible, marchesSelectionnes: marches, cleIA, fournisseurIA: fourn
+      })
+    });
+    clearInterval(iv2); majProg(100);
+
+    if (!data.success) {
+      toast(data.message || 'Aucun combiné trouvé. Réduisez la cote ou ajoutez des marchés.', 'err');
+      cacherProg();
+      document.getElementById('secFormulaire').style.display = 'block';
+    } else {
+      cacherProg();
+      rendreResultat(data.data);
+      document.getElementById('secResult').style.display = 'block';
+      document.getElementById('secResult').scrollIntoView({ behavior: 'smooth' });
+    }
+  } catch (e) {
+    clearInterval(iv2); cacherProg();
+    toast('Erreur : ' + e.message, 'err');
+    document.getElementById('secFormulaire').style.display = 'block';
+  } finally {
+    document.getElementById('btnGenerer').disabled = false;
   }
 }
 
-// ═══════════════════════════════════════════════════════════════
-// UTILITAIRES GLOBAUX
-// ═══════════════════════════════════════════════════════════════
+// ── Mode 2 : Choisir les matchs manuellement ──────────
+async function chargerMatchsSeulement() {
+  const { deb, fin } = getParams();
+  if (!deb) { toast('Choisissez une date de début', 'err'); return; }
 
-function telechargerZip(){
-  window.open(`${API_URL}/admin/export-zip?token=${token}`);
+  document.getElementById('secFormulaire').style.display = 'none';
+  document.getElementById('secResult').style.display    = 'none';
+  afficherProg('📡 Récupération des matchs…');
+  let pct = 0;
+  const iv = setInterval(() => { pct = Math.min(pct + 8, 90); majProg(pct); }, 300);
+
+  try {
+    const data = await fetchMatchs(deb, fin);
+    clearInterval(iv); majProg(100);
+    if (data.error) { toast(data.error, 'err'); cacherProg(); document.getElementById('secFormulaire').style.display = 'block'; return; }
+    matchsRecuperes = data.matches || [];
+    if (!matchsRecuperes.length) {
+      toast('Aucun match trouvé pour cette période.', 'err');
+      cacherProg(); document.getElementById('secFormulaire').style.display = 'block'; return;
+    }
+    matchsSelectionnes = new Set(matchsRecuperes.map(m => m.id));
+    rendreGrilleMatchs();
+    cacherProg();
+    document.getElementById('secMatchs').style.display = 'block';
+    toast(`${matchsRecuperes.length} matchs chargés — choisissez puis cliquez Générer`, 'ok');
+  } catch (e) {
+    clearInterval(iv); cacherProg();
+    toast('Erreur réseau : ' + e.message, 'err');
+    document.getElementById('secFormulaire').style.display = 'block';
+  }
 }
 
-// ── Démarrage ──────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', ()=>{
-  const today = new Date().toISOString().split('T')[0];
-  if($('dateDebut')) $('dateDebut').value = today;
-  if($('dateFin')) $('dateFin').value = today;
-  if($('pmDate')) $('pmDate').value = today;
-  if($('amStart')) $('amStart').value = today;
-  if($('aDateDebut')) $('aDateDebut').value = today;
-  if($('aDateFin')) $('aDateFin').value = today;
+// ── Générer depuis la sélection manuelle ───────────────
+async function genererDepuisSelection() {
+  const selects = matchsRecuperes.filter(m => matchsSelectionnes.has(m.id));
+  if (selects.length < 2) { toast('Sélectionnez au moins 2 matchs', 'err'); return; }
 
-  initSession();
+  const { deb, fin, coteCible, marches, cleIA, fourn } = getParams();
+  if (!marches.length) { toast('Sélectionnez au moins un type de pari', 'err'); return; }
+
+  document.getElementById('secMatchs').style.display = 'none';
+  afficherProg('🤖 Génération du pronostic IA…');
+  document.getElementById('btnGen').disabled = true;
+
+  let pct = 10;
+  const iv = setInterval(() => { pct = Math.min(pct + 5, 90); majProg(pct); }, 400);
+
+  try {
+    const data = await api('/pronostics', {
+      method: 'POST',
+      body: JSON.stringify({
+        matchsSelectionnes: selects,
+        startDate: deb, endDate: fin || deb,
+        coteCible, marchesSelectionnes: marches, cleIA, fournisseurIA: fourn
+      })
+    });
+    clearInterval(iv); majProg(100);
+    if (!data.success) {
+      toast(data.message || 'Aucun combiné trouvé. Réduisez la cote.', 'err');
+      document.getElementById('secMatchs').style.display = 'block';
+    } else {
+      cacherProg();
+      rendreResultat(data.data);
+      document.getElementById('secResult').style.display = 'block';
+      document.getElementById('secResult').scrollIntoView({ behavior: 'smooth' });
+    }
+  } catch (e) {
+    clearInterval(iv); cacherProg();
+    toast('Erreur : ' + e.message, 'err');
+    document.getElementById('secMatchs').style.display = 'block';
+  } finally {
+    document.getElementById('btnGen').disabled = false;
+  }
+}
+
+function rendreGrilleMatchs() {
+  const grid = document.getElementById('matchsGrid');
+  grid.innerHTML = matchsRecuperes.map(m => {
+    const on = matchsSelectionnes.has(m.id);
+    const h = m.heure ? new Date(m.heure).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : m.date;
+    return `
+    <div class="mcard ${on ? 'on' : 'off'}" id="mc_${m.id}" onclick="basculeMatch('${m.id}')">
+      <span class="mcard-check">${on ? '✅' : '○'}</span>
+      <div class="mcard-comp">🏆 ${esc(m.competition)}</div>
+      <div class="mcard-teams">${esc(m.equipe_domicile)} <span style="opacity:.35">vs</span> ${esc(m.equipe_exterieur)}</div>
+      <div class="mcard-date">📅 ${h}</div>
+    </div>`;
+  }).join('');
+  majSelCount();
+}
+
+function basculeMatch(id) {
+  if (matchsSelectionnes.has(id)) matchsSelectionnes.delete(id);
+  else matchsSelectionnes.add(id);
+  const card = document.getElementById('mc_' + id);
+  if (card) {
+    const on = matchsSelectionnes.has(id);
+    card.className = `mcard ${on ? 'on' : 'off'}`;
+    card.querySelector('.mcard-check').textContent = on ? '✅' : '○';
+  }
+  majSelCount();
+}
+
+function majSelCount() {
+  const n = matchsSelectionnes.size;
+  document.getElementById('selCount').textContent = `${n} sélectionné${n > 1 ? 's' : ''}`;
+  document.getElementById('btnGen').disabled = n < 2;
+}
+
+// ── AFFICHAGE DU RÉSULTAT AMÉLIORÉ ───────────────────
+function rendreResultat(d) {
+  const conf = d.confiance || 72;
+  document.getElementById('resCote').textContent   = parseFloat(d.coteTotal).toFixed(2) + 'x';
+  document.getElementById('resConf').textContent   = conf + '%';
+  document.getElementById('resNbSel').textContent  = `${d.selections?.length || 0} sélection(s)`;
+  setTimeout(() => { document.getElementById('confFill').style.width = conf + '%'; }, 100);
+
+  document.getElementById('resSels').innerHTML = (d.selections || []).map(s => `
+    <div class="sel-item">
+      <div class="sel-match">⚽ ${esc(s.match)}</div>
+      ${s.competition ? `<div class="sel-comp">🏆 ${esc(s.competition)}${s.date ? ' — ' + s.date : ''}</div>` : ''}
+      <div class="sel-choix">${esc(s.marche)} : <strong>${esc(s.selection)}</strong> <span class="cote-pill">@ ${parseFloat(s.cote).toFixed(2)}</span></div>
+    </div>`).join('');
+
+  document.getElementById('resIA').innerHTML = esc(d.analyseIA || '');
+
+  // Animation d'entrée
+  const resultCard = document.querySelector('.result-card');
+  if (resultCard) {
+    resultCard.style.animation = 'none';
+    resultCard.offsetHeight; // trigger reflow
+    resultCard.style.animation = 'fadeUp .6s ease both';
+  }
+}
+
+function resetCreation() {
+  document.getElementById('secResult').style.display    = 'none';
+  document.getElementById('secMatchs').style.display    = 'none';
+  document.getElementById('secProg').style.display      = 'none';
+  document.getElementById('secFormulaire').style.display = 'block';
+  document.getElementById('btnGenerer').disabled = false;
+  matchsRecuperes = []; matchsSelectionnes = new Set();
+}
+
+// ── Progress helpers ───────────────────────────────────
+function afficherProg(label) {
+  document.getElementById('progLabel').textContent = label;
+  document.getElementById('progFill').style.width = '0%';
+  document.getElementById('secProg').style.display = 'block';
+}
+function majProg(pct) {
+  document.getElementById('progFill').style.width = pct + '%';
+}
+function cacherProg() {
+  document.getElementById('secProg').style.display = 'none';
+  document.getElementById('progFill').style.width = '0%';
+}
+
+// ── Mes pronostics ─────────────────────────────────────
+async function chargerMesPronos() {
+  const box = document.getElementById('mesPronos');
+  box.innerHTML = '<div class="empty">⏳ Chargement…</div>';
+  const data = await api('/pronostics');
+  if (data.error) { box.innerHTML = `<div class="empty">${esc(data.error)}</div>`; return; }
+  const list = (data.pronostics || []).slice().reverse();
+  if (!list.length) { box.innerHTML = '<div class="empty">Vous n\'avez pas encore créé de pronostic.<br>Allez dans l\'onglet « Créer un pronostic ».</div>'; return; }
+  box.innerHTML = list.map(p => pronoCardHTML(p, false)).join('');
+}
+
+async function supprimerMonProno(id) {
+  if (!confirm('Supprimer ce pronostic définitivement ?')) return;
+  const d = await api(`/pronostics/${id}`, { method: 'DELETE' });
+  if (d.success) { toast('Pronostic supprimé', 'ok'); chargerMesPronos(); }
+  else toast(d.error || 'Erreur', 'err');
+}
+
+function pronoCardHTML(p, admin = false) {
+  const label = p.startDate + (p.endDate && p.endDate !== p.startDate ? ' → ' + p.endDate : '');
+  return `
+  <div class="pcard">
+    <div class="pcard-head">
+      <div>
+        ${admin ? `<span class="badge badge-user" style="font-size:.76rem;padding:4px 10px;">👤 ${esc(p.username || '?')}</span>` : ''}
+        <div style="font-weight:700;margin-top:${admin?'6':'0'}px;">📅 ${label}</div>
+        <div class="pcard-meta">Créé le ${dateFr(p.cree_le || p.created_at)}</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        ${pillStatut(p.statut_verification || p.verified_status)}
+        <button class="bsm b-del" onclick="${admin ? `adminSupprimerProno('${p.id}')` : `supprimerMonProno('${p.id}')`}">🗑️</button>
+      </div>
+    </div>
+    <div class="pcard-cote">${parseFloat(p.coteTotal || p.total_odd || 0).toFixed(2)}x</div>
+    <div style="margin-top:10px;">
+      ${(p.selections || p.combines || []).map(s => `
+        <div class="sel-item">
+          <div class="sel-match">⚽ ${esc(s.match)}</div>
+          ${(s.competition || s.league) ? `<div class="sel-comp">🏆 ${esc(s.competition || s.league)}</div>` : ''}
+          <div class="sel-choix">${esc(s.marche || s.market)} : <strong>${esc(s.selection)}</strong> <span class="cote-pill">@ ${parseFloat(s.cote || s.odd || 0).toFixed(2)}</span></div>
+        </div>`).join('')}
+    </div>
+    ${(p.analyseIA || p.ai_analysis) ? `
+    <div class="ai-box" style="margin-top:10px;">
+      <div class="ai-title">🤖 Analyse IA</div>
+      <div class="ai-text" style="font-size:.81rem;">${esc(p.analyseIA || p.ai_analysis)}</div>
+    </div>` : ''}
+  </div>`;
+}
+
+// ── Paramètres matchs (user) ───────────────────────────
+async function chargerParamMatchs() {
+  const date = document.getElementById('pmDate').value;
+  if (!date) { toast('Choisissez une date', 'err'); return; }
+  const box = document.getElementById('pmList');
+  box.innerHTML = '<div class="empty">⏳ Récupération en cours…</div>';
+  const data = await api(`/matches?startDate=${date}`);
+  if (data.error) { box.innerHTML = `<div class="empty">${esc(data.error)}</div>`; return; }
+  const m = data.matches || [];
+  if (!m.length) { box.innerHTML = '<div class="empty">Aucun match trouvé pour cette date.</div>'; return; }
+  box.innerHTML = `
+    <div style="font-size:.79rem;opacity:.45;margin-bottom:10px;">${m.length} matchs — ESPN + TheSportsDB</div>
+    <table class="dtable">
+      <thead><tr><th>Compétition</th><th>Équipe domicile</th><th>Équipe extérieure</th><th>Heure</th><th>Statut</th></tr></thead>
+      <tbody>${m.map(x => `
+        <tr>
+          <td>${esc(x.competition)}</td>
+          <td><strong>${esc(x.equipe_domicile)}</strong></td>
+          <td><strong>${esc(x.equipe_exterieur)}</strong></td>
+          <td>${x.heure ? new Date(x.heure).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) : '—'}</td>
+          <td style="font-size:.74rem;opacity:.55;">${esc(x.statut || 'Programmé')}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+// ── Paramètres vérification (user) ────────────────────
+async function chargerVerifUser() {
+  const box = document.getElementById('pvList');
+  box.innerHTML = '<div class="empty">⏳ Chargement…</div>';
+  const data = await api('/pronostics');
+  if (data.error) { box.innerHTML = `<div class="empty">${esc(data.error)}</div>`; return; }
+  const list = (data.pronostics || []).slice().reverse();
+  if (!list.length) { box.innerHTML = '<div class="empty">Aucun pronostic à afficher.</div>'; return; }
+  box.innerHTML = list.map(p => `
+    <div class="pcard" style="margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+        <div>
+          <strong>📅 ${p.startDate}${p.endDate && p.endDate !== p.startDate ? ' → '+p.endDate : ''}</strong>
+          <span class="pcard-meta" style="margin-left:8px;">${dateFr(p.cree_le)}</span>
+        </div>
+        ${pillStatut(p.statut_verification)}
+      </div>
+      <div class="pcard-cote" style="font-size:1.5rem;margin:8px 0;">${parseFloat(p.coteTotal || 0).toFixed(2)}x</div>
+      <div style="font-size:.77rem;opacity:.4;">${(p.selections||[]).length} sélection(s)</div>
+    </div>`).join('');
+}
+
+// ── Admin : Utilisateurs ───────────────────────────────
+async function chargerAdminUsers() {
+  const box = document.getElementById('adminUsers');
+  box.innerHTML = '<div class="empty">⏳ Chargement…</div>';
+  const data = await api('/admin/users');
+  if (data.error) { box.innerHTML = `<div class="empty">${esc(data.error)}</div>`; return; }
+  const users = data.users || [];
+  box.innerHTML = `
+    <table class="dtable">
+      <thead><tr><th>Identifiant</th><th>Mot de passe</th><th>Rôle</th><th>Statut</th><th>Inscription</th><th>Actions</th></tr></thead>
+      <tbody>${users.map(u => `
+        <tr>
+          <td><strong>${esc(u.username)}</strong></td>
+          <td><span class="pwd">${esc(u.password)}</span></td>
+          <td>${u.is_admin ? '<span class="pill pill-adm">👑 Admin</span>' : '👤 Membre'}</td>
+          <td>${u.is_confirmed ? '<span class="pill pill-conf">✅ Confirmé</span>' : '<span class="pill pill-ncf">⏳ En attente</span>'}</td>
+          <td style="font-size:.75rem;opacity:.45;">${dateFr(u.created_at)}</td>
+          <td style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 12px;">
+            ${!u.is_admin && !u.is_confirmed ? `<button class="bsm b-conf" onclick="confirmerUser('${u.id}')">✅ Confirmer</button>` : ''}
+            ${!u.is_admin ? `<button class="bsm b-del" onclick="supprimerUser('${u.id}','${esc(u.username)}')">🗑️ Supprimer</button>` : ''}
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+async function confirmerUser(id) {
+  const d = await api(`/admin/users/${id}/confirm`, { method: 'POST' });
+  if (d.success) { toast(d.message, 'ok'); chargerAdminUsers(); }
+  else toast(d.error || 'Erreur', 'err');
+}
+async function supprimerUser(id, nom) {
+  if (!confirm(`Supprimer le membre "${nom}" et tous ses pronostics ?`)) return;
+  const d = await api(`/admin/users/${id}`, { method: 'DELETE' });
+  if (d.success) { toast(d.message, 'ok'); chargerAdminUsers(); }
+  else toast(d.error || 'Erreur', 'err');
+}
+
+// ── Admin : Tous les pronostics ────────────────────────
+async function chargerAdminPronos() {
+  const box = document.getElementById('adminPronos');
+  box.innerHTML = '<div class="empty">⏳ Chargement…</div>';
+  const data = await api('/admin/pronostics');
+  if (data.error) { box.innerHTML = `<div class="empty">${esc(data.error)}</div>`; return; }
+  const list = (data.pronostics || []).slice().reverse();
+  document.getElementById('pronoBadge').textContent = list.length;
+  if (!list.length) { box.innerHTML = '<div class="empty">Aucun pronostic créé pour l\'instant.</div>'; return; }
+  box.innerHTML = list.map(p => pronoCardHTML(p, true)).join('');
+}
+async function adminSupprimerProno(id) {
+  if (!confirm('Supprimer ce pronostic ?')) return;
+  const d = await api(`/admin/pronostics/${id}`, { method: 'DELETE' });
+  if (d.success) { toast('Supprimé', 'ok'); chargerAdminPronos(); }
+  else toast(d.error || 'Erreur', 'err');
+}
+
+// ── Admin : Paramètres Matchs ──────────────────────────
+async function chargerAdminMatchs() {
+  const start = document.getElementById('amStart').value;
+  const end   = document.getElementById('amEnd').value   || start;
+  if (!start) { toast('Choisissez une date', 'err'); return; }
+  const box   = document.getElementById('amTable');
+  const stats = document.getElementById('amStats');
+  box.innerHTML = '<div class="empty">⏳ Récupération ESPN + TheSportsDB…</div>';
+  stats.textContent = '';
+  const data = await api(`/matches?startDate=${start}&endDate=${end}`);
+  if (data.error) { box.innerHTML = `<div class="empty">${esc(data.error)}</div>`; return; }
+  const m = data.matches || [];
+  stats.textContent = `${m.length} matchs récupérés sur ${(data.dates||[start]).length} jour(s) — Sources : ESPN API + TheSportsDB`;
+  if (!m.length) { box.innerHTML = '<div class="empty">Aucun match trouvé.</div>'; return; }
+  box.innerHTML = `
+    <table class="dtable">
+      <thead><tr><th>Date</th><th>Compétition</th><th>Domicile</th><th>Extérieur</th><th>Heure</th><th>Statut</th></tr></thead>
+      <tbody>${m.map(x => `
+        <tr>
+          <td style="font-size:.78rem;opacity:.6;">${x.date}</td>
+          <td>${esc(x.competition)}</td>
+          <td><strong>${esc(x.equipe_domicile)}</strong></td>
+          <td><strong>${esc(x.equipe_exterieur)}</strong></td>
+          <td>${x.heure ? new Date(x.heure).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}) : '—'}</td>
+          <td style="font-size:.73rem;opacity:.5;">${esc(x.statut || 'Programmé')}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+// ── Admin : Paramètres Vérifier ────────────────────────
+async function chargerAdminVerif() {
+  const box = document.getElementById('avList');
+  box.innerHTML = '<div class="empty">⏳ Chargement…</div>';
+  const data = await api('/admin/pronostics');
+  if (data.error) { box.innerHTML = `<div class="empty">${esc(data.error)}</div>`; return; }
+  const list = (data.pronostics || []).slice().reverse();
+  if (!list.length) { box.innerHTML = '<div class="empty">Aucun pronostic à vérifier.</div>'; return; }
+  box.innerHTML = `
+    <table class="dtable">
+      <thead><tr><th>Membre</th><th>Date(s)</th><th>Cote</th><th>Sélections</th><th>Statut actuel</th><th>Vérifier</th></tr></thead>
+      <tbody>${list.map(p => `
+        <tr id="vr_${p.id}">
+          <td><strong>${esc(p.username || '?')}</strong></td>
+          <td style="font-size:.79rem;">${p.startDate}${p.endDate&&p.endDate!==p.startDate?'→'+p.endDate:''}</td>
+          <td><strong>${parseFloat(p.coteTotal||p.total_odd||0).toFixed(2)}x</strong></td>
+          <td style="font-size:.75rem;opacity:.5;">${(p.selections||p.combines||[]).map(s=>esc((s.match||'').split(' - ')[0]||s.match||'?')).slice(0,3).join(', ')}…</td>
+          <td id="vs_${p.id}">${pillStatut(p.statut_verification||p.verified_status)}</td>
+          <td style="display:flex;gap:5px;padding:8px 12px;">
+            <button class="bsm b-conf" onclick="verifierProno('${p.id}','verifie')" title="Marquer gagné">✅ Gagné</button>
+            <button class="bsm b-del"  onclick="verifierProno('${p.id}','perdu')"   title="Marquer perdu">❌ Perdu</button>
+            <button class="bsm b-ver"  onclick="verifierProno('${p.id}','en_attente')" title="Remettre en attente">⏳</button>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+async function verifierProno(id, statut) {
+  const d = await api(`/admin/pronostics/${id}/verify`, { method: 'POST', body: JSON.stringify({ status: statut }) });
+  if (d.success) {
+    const el = document.getElementById(`vs_${id}`);
+    if (el) el.innerHTML = pillStatut(statut);
+    toast('Statut mis à jour', 'ok');
+  } else toast(d.error || 'Erreur', 'err');
+}
+
+// ── Admin : Configuration ──────────────────────────────
+let configActuelle = {};
+
+async function chargerConfig() {
+  const grid = document.getElementById('cfgGrid');
+  const data = await api('/config');
+  configActuelle = data;
+
+  const champs = [
+    { key: 'displayedUsers',   label: '👤 Membres affichés',       val: data.displayedUsers },
+    { key: 'matchsAnalyses',   label: '⚽ Matchs analysés',        val: data.stats?.matchsAnalyses },
+    { key: 'pronosticsGeneres',label: '🎯 Pronostics générés',     val: data.stats?.pronosticsGeneres },
+    { key: 'tauxReussite',     label: '📈 Taux de réussite (%)',    val: data.stats?.tauxReussite }
+  ];
+
+  grid.innerHTML = champs.map(c => `
+    <div class="cfg-item">
+      <div class="cfg-label">${c.label}</div>
+      <input class="cfg-input" type="number" id="cfg_${c.key}" value="${c.val || 0}" min="0">
+    </div>`).join('');
+
+  const real = document.getElementById('statsReelles');
+  real.innerHTML = `
+    <table class="dtable">
+      <tbody>
+        <tr><td style="opacity:.55;">Membres réels inscrits</td><td><strong>${data.realUsers || 0}</strong></td></tr>
+        <tr><td style="opacity:.55;">Valeur affichée (configurable)</td><td><strong>${data.displayedUsers || 0}+</strong></td></tr>
+      </tbody>
+    </table>`;
+}
+
+async function sauvegarderConfig() {
+  const msg = document.getElementById('cfgMsg');
+  const body = {
+    displayedUsers:    document.getElementById('cfg_displayedUsers')?.value,
+    matchsAnalyses:    document.getElementById('cfg_matchsAnalyses')?.value,
+    pronosticsGeneres: document.getElementById('cfg_pronosticsGeneres')?.value,
+    tauxReussite:      document.getElementById('cfg_tauxReussite')?.value
+  };
+  const d = await api('/admin/config', { method: 'POST', body: JSON.stringify(body) });
+  if (d.success) {
+    msg.className = 'auth-msg ok'; msg.textContent = '✅ Configuration sauvegardée avec succès !';
+    toast('Configuration mise à jour', 'ok');
+    setTimeout(() => { msg.className = 'auth-msg'; }, 3000);
+  } else {
+    msg.className = 'auth-msg err'; msg.textContent = d.error || 'Erreur';
+  }
+}
+
+// ── Télécharger ZIP ────────────────────────────────────
+function telechargerZip() {
+  window.location.href = '/admin/export-zip';
+  toast('Téléchargement de molo.zip…', 'inf');
+}
+
+// ── Saisie clavier ─────────────────────────────────────
+function initKeyboard() {
+  document.getElementById('connPass')?.addEventListener('keydown', e => { if (e.key === 'Enter') doConnexion(); });
+  document.getElementById('connUser')?.addEventListener('keydown', e => { if (e.key === 'Enter') doConnexion(); });
+  document.getElementById('inscPass')?.addEventListener('keydown', e => { if (e.key === 'Enter') doInscription(); });
+}
+
+// ── Init ───────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  initMarches();
+  initKeyboard();
+
+  const auj = new Date().toISOString().split('T')[0];
+  const setDate = id => { const el = document.getElementById(id); if (el) el.value = auj; };
+  setDate('amStart'); setDate('amEnd'); setDate('pmDate');
+
+  chargerStats();
+  restaurerSession();
 });

@@ -250,6 +250,7 @@
 
   <!-- ══ PAGE AUTH ══ -->
   <div class="page show" id="pageAuth">
+    <!-- Stats publiques -->
     <div class="stats-bar" id="statsBar">
       <div class="stat-card">
         <div class="stat-num" id="ctrUsers">—</div>
@@ -326,8 +327,11 @@
 
     <!-- Tab Créer -->
     <div class="inner-page show" id="tCreate">
+
+      <!-- ÉTAPE 1 : Formulaire de génération -->
       <div class="card" id="secFormulaire">
         <div class="card-title">🎯 Générer un pronostic intelligent</div>
+
         <div class="form-row">
           <div>
             <div class="flabel">📅 Date de début</div>
@@ -342,6 +346,7 @@
             <input class="fsel" type="number" id="coteCible" value="3.0" min="1.5" max="200" step="0.1">
           </div>
         </div>
+
         <div class="flabel" style="margin-bottom:8px;">⚽ Types de paris à inclure <span style="opacity:.4;font-size:.78rem;">(cliquez pour activer/désactiver)</span></div>
         <div class="marches-row" id="marchesRow">
           <div class="mchip on" data-m="Victoire">🏆 Victoire (1X2)</div>
@@ -356,9 +361,12 @@
           <div class="mchip" data-m="Fautes">🟥 Fautes</div>
           <div class="mchip" data-m="Hors-jeu">🚩 Hors-jeu</div>
         </div>
+
+        <!-- BOUTON PRINCIPAL -->
         <button class="btn-main" id="btnGenerer" onclick="genererTout()" style="font-size:1.05rem;padding:15px;letter-spacing:.5px;">
           🎯 GÉNÉRER LE PRONOSTIC
         </button>
+
         <div style="text-align:center;margin-top:10px;">
           <button onclick="chargerMatchsSeulement()" style="background:none;border:none;color:rgba(255,255,255,.4);font-size:.8rem;cursor:pointer;text-decoration:underline;">
             ou choisir les matchs manuellement…
@@ -366,6 +374,7 @@
         </div>
       </div>
 
+      <!-- Chargement -->
       <div id="secProg" style="display:none">
         <div class="card">
           <div class="prog-wrap">
@@ -376,28 +385,36 @@
         </div>
       </div>
 
+      <!-- Résultat amélioré -->
       <div id="secResult" style="display:none">
         <div class="result-card">
           <div class="result-header">
             <h2>🎉 Pronostic généré avec succès !</h2>
             <span class="result-badge">✅ Toutes les cotes ≥ 1.20</span>
           </div>
+
           <div class="result-total">
             <div class="result-total-label">COTE TOTALE DU COMBINÉ</div>
             <div class="result-total-value" id="resCote"></div>
           </div>
+
           <div class="conf-bar-wrap">
             <div style="display:flex;justify-content:space-between;font-size:.72rem;opacity:.5;margin-bottom:4px;">
               <span>Confiance IA</span><span id="resConf"></span>
             </div>
             <div class="conf-bar-bg"><div class="conf-bar-fill" id="confFill" style="width:0%"></div></div>
           </div>
-          <div class="result-section-title">📋 Sélections</div>
+
+          <div class="result-section-title">
+            📋 ${document.getElementById('resNbSel')?.textContent || 'Sélections'}
+          </div>
           <div id="resSels"></div>
+
           <div class="ai-box">
             <div class="ai-title">🤖 Analyse de l'IA</div>
             <div class="ai-text" id="resIA"></div>
           </div>
+
           <div class="result-actions">
             <button class="btn-main" onclick="resetCreation()">🔄 Nouveau pronostic</button>
             <button class="btn-secondary" onclick="window.print()">🖨️ Imprimer</button>
@@ -405,6 +422,7 @@
         </div>
       </div>
 
+      <!-- Sélection manuelle (mode avancé) -->
       <div id="secMatchs" style="display:none">
         <div class="card">
           <div class="card-title">
@@ -419,6 +437,7 @@
           </div>
         </div>
       </div>
+
     </div>
 
     <!-- Tab Mes pronostics -->
@@ -434,7 +453,6 @@
       <div class="nav" style="margin-bottom:14px;">
         <div class="ntab active" onclick="showParamTab('pMatchs')">⚽ Matchs du jour</div>
         <div class="ntab" onclick="showParamTab('pVerif')">✅ Vérification</div>
-        <div class="ntab" onclick="showParamTab('pIA')">🤖 Clé IA</div>
       </div>
       <div class="inner-page show" id="pMatchs">
         <div class="card">
@@ -452,153 +470,27 @@
           <div id="pvList"></div>
         </div>
       </div>
-      <div class="inner-page" id="pIA">
-        <div class="card">
-          <div class="card-title">🤖 Configuration de l'Intelligence Artificielle</div>
-          <div class="infobox">
-            💡 Obtenez une clé API gratuite sur <a href="https://console.groq.com/keys" target="_blank">console.groq.com</a>. 
-            Sans clé, l'analyse utilise l'algorithme interne (moins détaillée).
-          </div>
-          <div class="fgroup">
-            <label style="font-size:.78rem;opacity:.6;">Fournisseur</label>
-            <select class="fsel" id="iaFournisseur">
-              <option value="groq">Groq (Gratuit — recommandé)</option>
-              <option value="openai">OpenAI (Payant)</option>
-            </select>
-          </div>
-          <div class="fgroup">
-            <label style="font-size:.78rem;opacity:.6;">Clé API</label>
-            <input class="finput" type="password" id="iaCle" placeholder="gsk_... (votre clé Groq)">
-          </div>
-          <div style="display:flex;gap:10px;margin-top:12px;">
-            <button class="btn-main" style="width:auto;padding:11px 28px;" onclick="sauverCleIA()">💾 Sauvegarder</button>
-            <button class="btn-secondary" onclick="testerCleIA()">🧪 Tester</button>
-          </div>
-          <div class="auth-msg" id="iaMsg" style="margin-top:12px;"></div>
-        </div>
-      </div>
     </div>
   </div>
 
   <!-- ══ PAGE ADMIN ══ -->
   <div class="page" id="pageAdmin">
     <nav class="nav" id="navAdmin">
-      <div class="ntab active" onclick="showAdminTab('aCreate')">🎯 Créer un pronostic</div>
-      <div class="ntab" onclick="showAdminTab('aUsers')">👥 Utilisateurs</div>
+      <div class="ntab active" onclick="showAdminTab('aUsers')">👥 Utilisateurs</div>
       <div class="ntab" onclick="showAdminTab('aPronos')">📊 Pronostics</div>
       <div class="ntab" onclick="showAdminTab('aMatchs')">⚽ Paramètres Matchs</div>
       <div class="ntab" onclick="showAdminTab('aVerif')">✅ Paramètres Vérifier</div>
       <div class="ntab" onclick="showAdminTab('aConfig')">⚙️ Configuration</div>
-      <div class="ntab" onclick="showAdminTab('aIA')">🤖 Clé IA</div>
       <div class="ntab zip" onclick="telechargerZip()">📦 molo.zip</div>
     </nav>
 
-    <!-- Admin: Créer pronostic -->
-    <div class="inner-page show" id="aCreate">
-      <div class="card" id="aSecFormulaire">
-        <div class="card-title">🎯 Générer un pronostic (Admin)</div>
-        <div class="form-row">
-          <div>
-            <div class="flabel">📅 Date de début</div>
-            <input class="fsel" type="date" id="aDateDebut">
-          </div>
-          <div>
-            <div class="flabel">📅 Date de fin <span style="opacity:.4">(max 10 jours)</span></div>
-            <input class="fsel" type="date" id="aDateFin">
-          </div>
-          <div>
-            <div class="flabel">🎯 Cote cible</div>
-            <input class="fsel" type="number" id="aCoteCible" value="3.0" min="1.5" max="200" step="0.1">
-          </div>
-        </div>
-        <div class="flabel" style="margin-bottom:8px;">⚽ Types de paris à inclure</div>
-        <div class="marches-row" id="aMarchesRow">
-          <div class="mchip on" data-m="Victoire">🏆 Victoire (1X2)</div>
-          <div class="mchip on" data-m="Double chance">🔒 Double chance</div>
-          <div class="mchip on" data-m="Total Buts">⚽ Total buts</div>
-          <div class="mchip on" data-m="Les deux équipes marquent">🥅 Les 2 marquent</div>
-          <div class="mchip" data-m="Buts Domicile">🏠 Buts domicile</div>
-          <div class="mchip" data-m="Buts Extérieur">✈️ Buts extérieur</div>
-          <div class="mchip" data-m="Score exact">🎯 Score exact</div>
-          <div class="mchip" data-m="Corners">📐 Corners</div>
-          <div class="mchip" data-m="Tirs cadrés">🏹 Tirs cadrés</div>
-          <div class="mchip" data-m="Fautes">🟥 Fautes</div>
-          <div class="mchip" data-m="Hors-jeu">🚩 Hors-jeu</div>
-        </div>
-        <button class="btn-main" id="aBtnGenerer" onclick="adminGenererTout()" style="font-size:1.05rem;padding:15px;letter-spacing:.5px;">
-          🎯 GÉNÉRER LE PRONOSTIC
-        </button>
-        <div style="text-align:center;margin-top:10px;">
-          <button onclick="adminChargerMatchsSeulement()" style="background:none;border:none;color:rgba(255,255,255,.4);font-size:.8rem;cursor:pointer;text-decoration:underline;">
-            ou choisir les matchs manuellement…
-          </button>
-        </div>
-      </div>
-
-      <div id="aSecProg" style="display:none">
-        <div class="card">
-          <div class="prog-wrap">
-            <div class="prog-label" id="aProgLabel">Chargement…</div>
-            <div class="prog-bar"><div class="prog-fill" id="aProgFill" style="width:0%"></div></div>
-            <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
-          </div>
-        </div>
-      </div>
-
-      <div id="aSecResult" style="display:none">
-        <div class="result-card">
-          <div class="result-header">
-            <h2>🎉 Pronostic généré avec succès !</h2>
-            <span class="result-badge">✅ Toutes les cotes ≥ 1.20</span>
-          </div>
-          <div class="result-total">
-            <div class="result-total-label">COTE TOTALE DU COMBINÉ</div>
-            <div class="result-total-value" id="aResCote"></div>
-          </div>
-          <div class="conf-bar-wrap">
-            <div style="display:flex;justify-content:space-between;font-size:.72rem;opacity:.5;margin-bottom:4px;">
-              <span>Confiance IA</span><span id="aResConf"></span>
-            </div>
-            <div class="conf-bar-bg"><div class="conf-bar-fill" id="aConfFill" style="width:0%"></div></div>
-          </div>
-          <div class="result-section-title">📋 Sélections</div>
-          <div id="aResSels"></div>
-          <div class="ai-box">
-            <div class="ai-title">🤖 Analyse de l'IA</div>
-            <div class="ai-text" id="aResIA"></div>
-          </div>
-          <div class="result-actions">
-            <button class="btn-main" onclick="adminResetCreation()">🔄 Nouveau pronostic</button>
-            <button class="btn-secondary" onclick="window.print()">🖨️ Imprimer</button>
-          </div>
-        </div>
-      </div>
-
-      <div id="aSecMatchs" style="display:none">
-        <div class="card">
-          <div class="card-title">
-            ⚽ Sélection manuelle des matchs
-            <span class="sel-count" id="aSelCount">0 sélectionné</span>
-          </div>
-          <div style="font-size:.79rem;opacity:.45;margin-bottom:12px;">Cliquez sur un match pour le retirer de la sélection. Gardez au moins 2 matchs.</div>
-          <div id="aMatchsGrid" class="matches-grid"></div>
-          <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;">
-            <button class="btn-main" id="aBtnGen" onclick="adminGenererDepuisSelection()">🤖 Générer avec ces matchs</button>
-            <button onclick="adminResetCreation()" style="padding:14px 20px;background:rgba(255,255,255,.06);border:1px solid var(--border);border-radius:14px;color:#fff;cursor:pointer;font-size:.88rem;">✕ Annuler</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Admin: Utilisateurs -->
-    <div class="inner-page" id="aUsers">
+    <div class="inner-page show" id="aUsers">
       <div class="card">
         <div class="card-title">👥 Gestion des membres</div>
         <div id="adminUsers"></div>
       </div>
     </div>
 
-    <!-- Admin: Pronostics -->
     <div class="inner-page" id="aPronos">
       <div class="card">
         <div class="card-title">📊 Tous les pronostics <span class="cbadge" id="pronoBadge">—</span></div>
@@ -606,7 +498,6 @@
       </div>
     </div>
 
-    <!-- Admin: Matchs -->
     <div class="inner-page" id="aMatchs">
       <div class="card">
         <div class="card-title">⚽ Paramètres Matchs — Récupération en direct</div>
@@ -620,7 +511,6 @@
       </div>
     </div>
 
-    <!-- Admin: Vérification -->
     <div class="inner-page" id="aVerif">
       <div class="card">
         <div class="card-title">✅ Paramètres Vérifier — Gestion des statuts</div>
@@ -628,7 +518,6 @@
       </div>
     </div>
 
-    <!-- Admin: Config -->
     <div class="inner-page" id="aConfig">
       <div class="card">
         <div class="card-title">⚙️ Configuration de l'affichage</div>
@@ -642,33 +531,6 @@
       <div class="card">
         <div class="card-title">📊 Statistiques réelles</div>
         <div id="statsReelles"></div>
-      </div>
-    </div>
-
-    <!-- Admin: Clé IA -->
-    <div class="inner-page" id="aIA">
-      <div class="card">
-        <div class="card-title">🤖 Configuration de l'Intelligence Artificielle (Admin)</div>
-        <div class="infobox">
-          💡 Obtenez une clé API gratuite sur <a href="https://console.groq.com/keys" target="_blank">console.groq.com</a>. 
-          Sans clé, l'analyse utilise l'algorithme interne (moins détaillée).
-        </div>
-        <div class="fgroup">
-          <label style="font-size:.78rem;opacity:.6;">Fournisseur</label>
-          <select class="fsel" id="aIaFournisseur">
-            <option value="groq">Groq (Gratuit — recommandé)</option>
-            <option value="openai">OpenAI (Payant)</option>
-          </select>
-        </div>
-        <div class="fgroup">
-          <label style="font-size:.78rem;opacity:.6;">Clé API</label>
-          <input class="finput" type="password" id="aIaCle" placeholder="gsk_... (votre clé Groq)">
-        </div>
-        <div style="display:flex;gap:10px;margin-top:12px;">
-          <button class="btn-main" style="width:auto;padding:11px 28px;" onclick="adminSauverCleIA()">💾 Sauvegarder</button>
-          <button class="btn-secondary" onclick="adminTesterCleIA()">🧪 Tester</button>
-        </div>
-        <div class="auth-msg" id="aIaMsg" style="margin-top:12px;"></div>
       </div>
     </div>
   </div>
