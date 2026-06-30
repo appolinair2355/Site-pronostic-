@@ -1,0 +1,59 @@
+{
+  "pronostics": [
+    {
+      "id": "mqx057m047yrt",
+      "user_id": "mqx027xh1jsej",
+      "username": "sossou",
+      "startDate": "2026-06-28",
+      "endDate": "2026-06-30",
+      "coteCible": 50,
+      "marchesSelectionnes": [
+        "Victoire",
+        "Total Buts",
+        "Les deux équipes marquent",
+        "Corners",
+        "Double chance"
+      ],
+      "selections": [
+        {
+          "match": "South Africa - Canada",
+          "competition": "Canada at South Africa",
+          "date": "2026-06-28",
+          "marche": "Victoire",
+          "selection": "Victoire South Africa",
+          "cote": 1.89
+        },
+        {
+          "match": "Vancouver Rise FC - AFC Toronto",
+          "competition": "AFC Toronto at Vancouver Rise FC",
+          "date": "2026-06-28",
+          "marche": "Victoire",
+          "selection": "Victoire Vancouver Rise FC",
+          "cote": 2.94
+        },
+        {
+          "match": "Qingdao West Coast - Zhejiang Professional FC",
+          "competition": "Zhejiang Professional FC at Qingdao West Coast",
+          "date": "2026-06-28",
+          "marche": "Victoire",
+          "selection": "Victoire Qingdao West Coast",
+          "cote": 3.96
+        },
+        {
+          "match": "Dalian Yingbo - Shanghai Shenhua",
+          "competition": "Shanghai Shenhua at Dalian Yingbo",
+          "date": "2026-06-28",
+          "marche": "Victoire",
+          "selection": "Victoire Shanghai Shenhua",
+          "cote": 2.34
+        }
+      ],
+      "coteTotal": 51.49,
+      "confiance": 77,
+      "analyseIA": "📊 **Analyse automatique** — Combiné de 4 sélection(s), cote totale 51.49x.\n\nConseils:\n• Misez 2 à 5% de votre bankroll maximum\n• Vérifiez les compositions d'équipes avant de parier\n• Ajoutez une clé Groq (gratuit sur console.groq.com) pour une analyse IA détaillée",
+      "statut_verification": "en_attente",
+      "verifie_le": null,
+      "cree_le": "2026-06-27T23:39:37.800Z"
+    }
+  ]
+}
