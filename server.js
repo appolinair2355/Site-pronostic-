@@ -87,6 +87,7 @@ function adminMiddleware(req, res, next) {
 }
 function confirmedMiddleware(req, res, next) {
   authMiddleware(req, res, () => {
+    // ✅ FIX: Admin est toujours confirmé automatiquement
     if (!req.user.is_confirmed && !req.user.is_admin)
       return res.status(403).json({ error: 'Compte en attente de confirmation' });
     next();
@@ -259,11 +260,9 @@ function genererCotes(domicile, exterieur) {
   const seed = (domicile + exterieur).split('').reduce((a, c) => a + c.charCodeAt(0), 0);
   const r = (min, max, off = 0) => parseFloat((min + ((seed + off) % 1000) / 1000 * (max - min)).toFixed(2));
 
-  // Force relative pour calibrer les cotes
   const { dom, ext } = forceRelative(domicile, exterieur);
-  const avantage = dom - ext; // positif = domicile favoris
+  const avantage = dom - ext;
 
-  // Cotes 1X2 calibrées selon force
   let coteDom, coteNul, coteExt;
   if (avantage >= 2) {
     coteDom = r(1.30, 1.80, 0); coteNul = r(3.20, 4.50, 17); coteExt = r(4.50, 8.00, 37);
@@ -283,25 +282,20 @@ function genererCotes(domicile, exterieur) {
   const bttsOui = r(1.60, 2.10, 71);
   const bttsNon = parseFloat(Math.max(1.50, (3.80 - bttsOui)).toFixed(2));
 
-  // Tirs cadrés : match offensif ou non
   const tirsPlus = r(1.65, 2.10, 79);
   const cornerPlus = r(1.70, 2.10, 89);
   const fautesPlus = r(1.70, 2.10, 103);
 
-  // Score exact : les plus probables selon force
   const scores = avantage >= 1
     ? [['1-0', r(4.0,7.0,7)],['2-0', r(5.0,9.0,11)],['2-1', r(5.5,9.5,13)],['1-1', r(5.0,8.0,17)],['3-1', r(9.0,16.0,19)]]
     : avantage <= -1
     ? [['0-1', r(4.0,7.0,7)],['0-2', r(5.0,9.0,11)],['1-2', r(5.5,9.5,13)],['1-1', r(5.0,8.0,17)],['0-3', r(9.0,16.0,19)]]
     : [['1-1', r(4.5,7.0,7)],['1-0', r(5.0,8.0,11)],['0-1', r(5.0,8.0,13)],['2-1', r(7.0,11.0,17)],['0-0', r(6.0,10.0,19)]];
 
-  // Buts domicile / extérieur individuel
   const butsDom1p = r(1.60, 2.10, 43);
   const butsExt1p = r(1.80, 2.40, 57);
   const domPlus15 = r(1.90, 2.60, 67);
   const extPlus15 = r(2.10, 3.00, 73);
-
-  // Hors-jeu (nb de hors-jeu total match)
   const horsjeuPlus = r(1.75, 2.20, 121);
 
   return {
@@ -360,7 +354,6 @@ function genererCotes(domicile, exterieur) {
   };
 }
 
-// Traduit les noms de ligues ESPN en français
 function traduireCompetition(nom) {
   const map = {
     'FIFA World Cup': 'Coupe du Monde FIFA',
@@ -489,13 +482,11 @@ app.get('/matches', confirmedMiddleware, async (req, res) => {
 });
 
 // ── PRONOSTICS : Créer ────────────────────────────────────────────────────────
-// FILTRE: aucune cote inférieure à 1.20
 const COTE_MIN = 1.20;
 
 function genererCombines(matches, marches, coteCible, maxMatchs) {
   const resultats = [];
 
-  // Filtrer les marchés pour ne garder que les cotes >= COTE_MIN
   const matchesFiltres = matches.map(m => {
     const marchesFiltres = {};
     for (const mk of marches) {
@@ -511,11 +502,9 @@ function genererCombines(matches, marches, coteCible, maxMatchs) {
 
   function backtrack(idx, current, coteActuelle) {
     if (coteActuelle >= coteCible && current.length >= 2) {
-      // Vérifier qu'aucune cote individuelle n'est < COTE_MIN
       const toutesCotesValides = current.every(s => s.cote >= COTE_MIN);
       if (!toutesCotesValides) return;
 
-      // Confiance calculée : plus les cotes individuelles sont basses (= plus probables), plus on est confiant
       const coteMoyenne = coteActuelle / current.length;
       const conf = Math.max(30, Math.min(95, Math.round(110 - coteMoyenne * 18)));
       resultats.push({ selections: [...current], coteTotal: parseFloat(coteActuelle.toFixed(2)), confiance: conf });
@@ -525,7 +514,7 @@ function genererCombines(matches, marches, coteCible, maxMatchs) {
     const m = matchesFiltres[idx];
     for (const marche of marches.filter(mk => m.marches?.[mk])) {
       for (const issue of (m.marches[marche] || [])) {
-        if (issue.cote < COTE_MIN) continue; // Double vérification
+        if (issue.cote < COTE_MIN) continue;
         backtrack(idx + 1, [...current, {
           match: `${m.equipe_domicile} - ${m.equipe_exterieur}`,
           competition: m.competition || '',
@@ -542,17 +531,13 @@ function genererCombines(matches, marches, coteCible, maxMatchs) {
   return resultats;
 }
 
-// ── Analyse algorithmique complète (sans clé IA) ──────────────────────────────
 function analyserSansIA(selections, coteTotal) {
   const lignes = [];
-
-  // --- En-tête ---
   const nbSels = selections.length;
   const risque = coteTotal < 3 ? 'FAIBLE' : coteTotal < 6 ? 'MODÉRÉ' : coteTotal < 12 ? 'ÉLEVÉ' : 'TRÈS ÉLEVÉ';
   const emoji = coteTotal < 3 ? '🟢' : coteTotal < 6 ? '🟡' : coteTotal < 12 ? '🟠' : '🔴';
   lignes.push(`${emoji} ANALYSE PRONOSAI — ${nbSels} sélection(s) | Cote totale : ${coteTotal}x | Risque : ${risque}\n`);
 
-  // --- Analyse sélection par sélection ---
   lignes.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   lignes.push('📋 ANALYSE DE CHAQUE SÉLECTION\n');
 
@@ -560,8 +545,6 @@ function analyserSansIA(selections, coteTotal) {
     const [dom, ext] = (s.match || '').split(' - ');
     const { nd, ne } = forceRelative(dom, ext);
     const c = parseFloat(s.cote);
-
-    // Niveau de certitude basé sur la cote
     const certitude = c < 1.50 ? 'Très probable' : c < 2.00 ? 'Probable' : c < 2.80 ? 'Incertain' : 'Risqué';
     const starIcon = c < 1.50 ? '⭐⭐⭐' : c < 2.00 ? '⭐⭐' : c < 2.80 ? '⭐' : '⚡';
 
@@ -570,7 +553,6 @@ function analyserSansIA(selections, coteTotal) {
     lignes.push(`   ✅ Sélection : ${s.marche} → ${s.selection}`);
     lignes.push(`   💰 Cote : ${c.toFixed(2)} | ${starIcon} ${certitude}`);
 
-    // Analyse contextuelle des équipes
     const domLevel = nd === 'élite' ? 'club de premier plan (élite mondiale)' : nd === 'fort' ? 'solide équipe de milieu de tableau' : 'équipe standard';
     const extLevel = ne === 'élite' ? 'club de premier plan (élite mondiale)' : ne === 'fort' ? 'solide équipe' : 'équipe de niveau standard';
 
@@ -578,7 +560,6 @@ function analyserSansIA(selections, coteTotal) {
       lignes.push(`   📊 ${dom} (${domLevel}) vs ${ext} (${extLevel})`);
     }
 
-    // Analyse par type de marché
     const m = (s.marche || '').toLowerCase();
     if (m.includes('victoire')) {
       const fav = s.selection.toLowerCase().includes(dom?.toLowerCase() || '') ? dom : ext;
@@ -610,11 +591,9 @@ function analyserSansIA(selections, coteTotal) {
     lignes.push('');
   }
 
-  // --- Analyse globale du combiné ---
   lignes.push('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   lignes.push('📈 ÉVALUATION GLOBALE DU COMBINÉ\n');
 
-  // Diversification des marchés
   const marchesUniques = [...new Set(selections.map(s => s.marche))];
   if (marchesUniques.length > 1) {
     lignes.push(`✅ Bon équilibre : ${marchesUniques.length} marchés différents (${marchesUniques.join(', ')}) = risque réparti`);
@@ -622,16 +601,13 @@ function analyserSansIA(selections, coteTotal) {
     lignes.push(`ℹ️ Combiné mono-marché (${marchesUniques[0]}). Diversifiez pour réduire le risque systémique.`);
   }
 
-  // Compétitions
   const comps = [...new Set(selections.map(s => s.competition).filter(Boolean))];
   if (comps.length > 1) lignes.push(`✅ Matchs issus de ${comps.length} compétitions différentes = exposition géographique diversifiée`);
 
-  // Analyse des cotes individuelles
   const cotesMoyennes = selections.reduce((a, s) => a + parseFloat(s.cote), 0) / selections.length;
   lignes.push(`📊 Cote moyenne par sélection : ${cotesMoyennes.toFixed(2)}x (${cotesMoyennes < 1.7 ? 'prudent' : cotesMoyennes < 2.5 ? 'équilibré' : 'ambitieux'})`);
   lignes.push(`💰 Potentiel : ${coteTotal}x votre mise`);
 
-  // Recommandation de mise
   lignes.push('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   lignes.push('💼 RECOMMANDATION DE GESTION BANKROLL\n');
   const pctMise = coteTotal < 3 ? '5-8%' : coteTotal < 6 ? '3-5%' : coteTotal < 12 ? '1-3%' : '0.5-1%';
@@ -653,7 +629,6 @@ function analyserSansIA(selections, coteTotal) {
 
 async function analyserAvecIA(selections, coteTotal, cle, fournisseur) {
   if (!cle) {
-    // Analyse algorithmique complète, pas juste un message vide
     return analyserSansIA(selections, coteTotal);
   }
   const liste = selections.map(s =>
@@ -691,7 +666,6 @@ Sois précis, professionnel et factuel. Utilise des emojis pour la lisibilité.`
     }, { headers: { 'Authorization': `Bearer ${cle}`, 'Content-Type': 'application/json' }, timeout: 20000 });
     return resp.data.choices[0].message.content;
   } catch (e) {
-    // Fallback sur l'analyse algorithmique si l'IA échoue
     const errMsg = e.response?.data?.error?.message || e.message;
     console.log(`⚠️ [IA] Erreur (${errMsg}), fallback algorithme`);
     return analyserSansIA(selections, coteTotal);
@@ -702,7 +676,6 @@ app.post('/pronostics', confirmedMiddleware, async (req, res) => {
   const { matchsSelectionnes, startDate, endDate, coteCible, marchesSelectionnes, cleIA, fournisseurIA } = req.body;
   if (!matchsSelectionnes?.length) return res.status(400).json({ error: 'Aucun match sélectionné' });
 
-  // Validation de la cote cible
   const coteCibleValide = Math.max(1.5, Math.min(200, parseFloat(coteCible) || 3.0));
 
   const combines = genererCombines(matchsSelectionnes, marchesSelectionnes || ['Victoire'], coteCibleValide, 8);
@@ -710,7 +683,6 @@ app.post('/pronostics', confirmedMiddleware, async (req, res) => {
   if (!combines.length)
     return res.json({ success: false, message: 'Aucun combiné trouvé avec les critères actuels. Réduisez la cote cible ou ajoutez des marchés. Toutes les cotes doivent être ≥ 1.20.' });
 
-  // Trier par proximité avec la cote cible, puis par confiance
   const meilleurs = combines.sort((a, b) => {
     const diffA = Math.abs(a.coteTotal - coteCibleValide);
     const diffB = Math.abs(b.coteTotal - coteCibleValide);
@@ -718,7 +690,6 @@ app.post('/pronostics', confirmedMiddleware, async (req, res) => {
     return b.confiance - a.confiance;
   });
 
-  // Prendre le meilleur
   const meilleur = meilleurs[0];
 
   const analyse = await analyserAvecIA(meilleur.selections, meilleur.coteTotal, cleIA || '', fournisseurIA || 'groq');
